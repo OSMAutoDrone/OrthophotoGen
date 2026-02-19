@@ -11,7 +11,7 @@ A big thank you to our La Ruche contributors:
 -Élizabeth Harnois
 -La menuiserie des Pins Ltée
 -Stephane Lemieux
--La famille Carrière
+-Carrière Familly
 -Dean Di Maulo
 -Lara Giusti
 -Edda Giusti
