@@ -8,7 +8,7 @@
             "name": "CameraCalibExtractor --plot result",
             "type": "debugpy",
             "request": "launch",
-            "program": "${file}",
+            "program": "CameraCalibration.py",
             "console": "integratedTerminal",
             "args": "--PR"
         },
@@ -16,7 +16,7 @@
             "name": "CameraCalibExtractor",
             "type": "debugpy",
             "request": "launch",
-            "program": "${file}",
+            "program": "CameraCalibration.py",
             "console": "integratedTerminal",
             "args": ""
         }
