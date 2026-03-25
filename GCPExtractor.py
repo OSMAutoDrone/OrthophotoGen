@@ -211,7 +211,14 @@ if __name__  == "__main__":
     
     
 #resumé des steps
-# 
+# 1- setup des variables de test
+#       > pour l'instant représente un DEM imaginaire qui aurait déjà été transformé de lat/long à x/y metres centré sur le drone
+# 2- calcul de la position des coins de l'image
+# 3- calcul le vecteur de diretion de la camera vers un point de la grille du DEM
+#       > TODO automatiser le choix des points à extraire
+# 4- calcul la normale du plan de l'image
+# 5- calcul l'intersection entre le vecteur de gcp et le plan de l'image
+# 6- plot pour visualisation des données
 
 ##unknowns
 # comment placer les coord avec l'orientation de la cam
