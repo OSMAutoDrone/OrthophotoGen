@@ -1,5 +1,9 @@
 #from osgeo import gdal
 import numpy as np
+import numpy as np
+from scipy.spatial import Delaunay
+from osgeo import gdal
+from osgeo import ogr, osr
 
 ############################
 #for debugging
@@ -8,8 +12,7 @@ from mpl_toolkits import mplot3d
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.patches import FancyArrowPatch
 from mpl_toolkits.mplot3d import proj3d
-from osgeo import gdal
-from osgeo import ogr, osr
+
 
 class Arrow3D(FancyArrowPatch):
     def __init__(self, x, y, z, dx, dy, dz, *args, **kwargs):
@@ -42,12 +45,18 @@ def _arrow3D(ax, x, y, z, dx, dy, dz, *args, **kwargs):
 
 
 def helperPlot(ground, camera_matrix, image_plane, gcp, pvector, img_norm, intersect, opacity):
+    print("starting to plot")
     setattr(Axes3D, 'arrow3D', _arrow3D)
     fig = plt.figure()
     ax = fig.add_subplot(projection='3d')
     ax.set_title("Visualisation d'un calcul de PCG")
     #ground
-    ax.plot_trisurf(ground[0,:],ground[1,:],ground[2,:], color = (139/255, 69/255, 19/255, opacity), edgecolor=(139/255, 69/255, 19/255, 1), linewidth=0.1)
+    Xg = ground[0,:].flatten()
+    Yg = ground[1,:].flatten()
+    Zg = ground[2,:].flatten()
+    mask = Zg != -32767
+    #ax.scatter3D(Xg[mask],Yg[mask],Zg[mask], marker='.', c=Z[mask], cmap='viridis') 
+    ax.plot_trisurf(Xg[mask],Yg[mask],Zg[mask], color = (139/255, 69/255, 19/255, opacity), edgecolor=(139/255, 69/255, 19/255, 1), linewidth=0.1)
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
     ax.set_zlabel('Z')
@@ -65,7 +74,7 @@ def helperPlot(ground, camera_matrix, image_plane, gcp, pvector, img_norm, inter
     ax.plot3D([camera_matrix[0,3],image_plane[0,2]], [camera_matrix[1,3],image_plane[1,2]], [camera_matrix[2,3],image_plane[2,2]], color='Black')
     ax.plot3D([camera_matrix[0,3],image_plane[0,3]], [camera_matrix[1,3],image_plane[1,3]], [camera_matrix[2,3],image_plane[2,3]], color='Black')
     #gcp point vector
-    ax.scatter3D(gcp[0,0],gcp[1,0],gcp[2,0], marker='x', s=75)
+    ax.scatter3D(gcp[0],gcp[1],gcp[2], marker='x', s=75)
     arrowGCP = Arrow3D(pvector[0,0], pvector[1,0], pvector[2,0], pvector[3,0], pvector[4,0], pvector[5,0], mutation_scale=10, fc='black')
     ax.add_artist(arrowGCP)
     #image plane normal
@@ -114,17 +123,17 @@ def loadImageParams(filename):
     return 0
 
 
-#return the image plane corners position world coord
+#return the image plane corners at position in world coord 
 def getImagePlaneCorners(camera_matrix, camera_params):
-    #TODO maybe add a ratio instead of a image plane at 0
-    flight_height = camera_params[2] + camera_params[2,3] #height of camera ASL at image trigger
+    flight_height = camera_matrix[2,3] #height of camera ASL at image trigger
     x_half_fov = np.deg2rad(camera_params[0]/2)
     y_half_fov = np.deg2rad(camera_params[1]/2)
     x1 = flight_height*np.tan(x_half_fov)
     x2 = flight_height*np.tan(-x_half_fov)
     y1 = flight_height*np.tan(y_half_fov)
     y2 = flight_height*np.tan(-y_half_fov)
-
+    
+    #height is set to 0 to have the polygon cover all points
     c1 = toWorldCoord(camera_matrix, x1, y1, flight_height)
     c2 = toWorldCoord(camera_matrix, x1, y2, flight_height)
     c3 = toWorldCoord(camera_matrix, x2, y2, flight_height)
@@ -144,8 +153,9 @@ def toWorldCoord(camera_matrix, x, y,z):
     pinw = np.matmul(camera_matrix,point_matrix)
     return pinw[0:3,[3]]
 
+
 #transform wsg84 to DEM CRS
-def cameraMatrixToLocalCoord(ds ,camera_matrix):
+def cameraMatrixGlobalToLocalCoord(ds ,camera_matrix):
     in_sr = osr.SpatialReference()
     in_sr.ImportFromEPSG(4326) #wsg84
     
@@ -167,7 +177,6 @@ def cameraMatrixToLocalCoord(ds ,camera_matrix):
     return camera_matrix
 
 
-
 #invert the given homogen matrix
 def invertHomogen(mat):
     R = np.array(mat[0:3, 0:3]).T
@@ -177,7 +186,8 @@ def invertHomogen(mat):
 
 #unit vector starting at p1 in direction of p2
 #return a column vector stacking p1 and direction
-def vectorFrom2Points(p1, p2):
+def vectorFrom2Points(p1, p2):    
+    p2 = np.array([p2]).T
     vec = (p2-p1)/np.linalg.norm(p2-p1)
     return np.vstack((p1,vec))
 
@@ -191,6 +201,7 @@ def planeNormalFrom3points(p1, p2, p3):
     n_norm = n/np.linalg.norm(n)
     return np.vstack((p1,n_norm))
 
+
 #collision between a vector and a plane
 # modified from from https://gist.github.com/TimSC/8c25ca941d614bf48ebba6b473747d72
 def LinePlaneCollision(planeNormal, planePoint, rayDirection, rayPoint, epsilon=1e-6):
@@ -203,6 +214,7 @@ def LinePlaneCollision(planeNormal, planePoint, rayDirection, rayPoint, epsilon=
 	return Psi
 
 
+#read a GEOTIFF dem file and return its GDAL handle
 def readDEMFile(filename):
     #TODO vérifier le path
     ds = gdal.Open(filename, gdal.GA_ReadOnly)
@@ -230,34 +242,28 @@ def DEMToNEArray(ds):
     return output_array
     
 
+#return point that ares in the polygon made by the camera view
+def getPointsInView(poly_points, point_array):
+    #need to transpose to use (n,3) shape required for func instead of (3,n)
+    polygon_hull = Delaunay(poly_points.T)    
+
+    simplex_mask = polygon_hull.find_simplex(point_array.T) >= 0
+    
+    points_in_poly = point_array.T[simplex_mask]
+
+    return points_in_poly
+
+
 #interpret arguments for this script
 def argparsing():
     return 0
 
 if __name__  == "__main__":
-    # 1 - test variable setup
+    # 1 - Read data sources
     gdal.UseExceptions()
     dem = readDEMFile('C:/Users/simon/OneDrive/Uni/PMC/dataset/HRDEM-Surface.tif')
-
-    #x,y metres centré sur la cam
-    # z altitude ASL
-    test_ground = np.array([[-2,-1, 0, 1, 2,
-                         -2,-1, 0, 1, 2,
-                         -2,-1, 0, 1, 2,
-                         -2,-1, 0, 1, 2,
-                         -2,-1, 0, 1, 2],
-                        [-2,-2,-2,-2,-2,
-                         -1,-1,-1,-1,-1,
-                          0, 0, 0, 0, 0,
-                          1, 1, 1, 1, 1,
-                          2, 2, 2, 2, 2],
-                        [10, 9, 8, 7, 6,
-                         9,  9, 8, 7, 6,
-                         9,  8, 7, 6, 6,
-                         8,  7, 6, 5, 5,
-                         7,  6, 5, 5, 5]])
     
-    #world orogin (0,0,0) is x,y of camera and 0 ASL
+    #world origin (0,0,0) is local CRS of camera
     #posision and rotation matrix for the camera -> obtained from loaded params
     #T 0->Cam
     #on pose que le z pointe vers l'avant (sors de l'objectif) et le x vers le dessus de la camera
@@ -266,55 +272,62 @@ if __name__  == "__main__":
     #WSG84 coord of test data 45.43401806769384, -71.85260984356981
     test_camera_matrix = np.array([[0,1,0,45.43401806769384],
                                    [1,0,0,-71.85260984356981],
-                                   [0,0,-1,178],
+                                   [0,0,-1,278],
                                    [0,0,0,1]])
-    #fov degrees vertical, horizontal, flight height AGL
-    test_camera_params = [10,15,100]
-
-    #test camera position in wsg84
-    test_cam_pos = [45.43401806769384, -71.85260984356981, 178]
+    #fov degrees vertical, horizontal
+    test_camera_params = [10,15]
 
     #2 - put camera in DEM CRS
-    test_camera_matrix = cameraMatrixToLocalCoord(dem, test_camera_matrix)
+    test_camera_matrix = cameraMatrixGlobalToLocalCoord(dem, test_camera_matrix)
 
     #3 - process DEM to North-East coord of each pixel
     # TODO seek optimisation, is this step necessary
-
     NE_elevation_array = DEMToNEArray(dem)
     
     #4 - calcul du plan de l'image
     #plan de l'image
     test_corners = getImagePlaneCorners(test_camera_matrix,test_camera_params)
     
-    #vecteur de gcp avec le point 14 du DEM
-    points_in_view = 1
+    #5 - extract which point are in the polygon made by the camera and it's image plane
+    test_camera_pos = test_camera_matrix[0:3,[3]]
+    pyramid_poly_points = np.hstack((test_camera_pos,test_corners))    
+    points_in_view = getPointsInView(pyramid_poly_points, NE_elevation_array)
 
-    v1 = vectorFrom2Points(test_camera_matrix[0:3,[3]],test_ground[0:3,[13]])
-
-    # find the normal to the image plan
+    #6 - calculate image plane normal
     image_plan_normal = planeNormalFrom3points(test_corners[:,[0]],test_corners[:,[1]],test_corners[:,[2]])
 
-    #intersection point
-    intersection_point = LinePlaneCollision(image_plan_normal[3:6,0],image_plan_normal[0:3,0],v1[3:6,0],v1[0:3,0])
+    intersection_points = np.array([])
+    #for each point
+    #TODO optimisation with multithreading
+    for point in points_in_view :
+        #7 - Calculate vector from 2 camera pos and DEM point
+        vec = vectorFrom2Points(test_camera_matrix[0:3,[3]], point)
+        
+        #8 - calculate vector intersection in image plane
+        intersection_point = LinePlaneCollision(image_plan_normal[3:6,0],image_plan_normal[0:3,0],vec[3:6,0],vec[0:3,0])
+        
+        #9 - combine source point (0:3) pos and intersection position (3:6) and add it to the intersection list
+        point_and_inter = np.array([np.hstack((point,intersection_point))]).T
+        intersection_points = np.append(intersection_points, point_and_inter)
+
+    #10 - TODO:Get pixel value in image plane for each intersection point
     
+
+    #11 - TODO:Export to txt file
+
+
+    print("fin")
+    #v1 = vectorFrom2Points(test_camera_matrix[0:3,[3]],test_ground[0:3,[13]])
+   
     #plot for convenience
-    helperPlot(test_ground, test_camera_matrix, test_corners,test_ground[0:3,[13]], v1, image_plan_normal, intersection_point, 0.25)
-    
+    helperPlot(NE_elevation_array, test_camera_matrix, test_corners, point, vec, image_plan_normal, intersection_point, 0.25)
     
 #resumé des steps
-# 1- setup des variables
-#       > pour l'instant représente un DEM imaginaire qui aurait déjà été transformé de lat/long à x/y metres centré sur le drone
 
-# 2- calcul de la position des coins de l'image
-# 3- calcul le vecteur de diretion de la camera vers un point de la grille du DEM
-#       > TODO automatiser le choix des points à extraire
-# 4- calcul la normale du plan de l'image
-# 5- calcul l'intersection entre le vecteur de gcp et le plan de l'image
-# 6- plot pour visualisation des données
 
 ##unknowns
 # comment placer les coord avec l'orientation de la cam
-# comment comment la transformation des param et position de la cam au dem en metre selon la cam
+# comment bien aligner le yaw de la cam dans le monde
 
 
 ##Améliorations possibles
