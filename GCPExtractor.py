@@ -115,11 +115,13 @@ def plotNEDEM(DEM):
 
 # load the camera fixed parameters and output its matrix
 def loadCameraParams(filename):
+    #TODO
     return 0 
 
 # load the images parameters and return the camera matrix
 # lat, long, elevation and 
 def loadImageParams(filename):
+    #TODO
     return 0
 
 
@@ -253,6 +255,7 @@ def getPointsInView(poly_points, point_array):
 
     return points_in_poly
 
+
 #return the pixel value 
 def getPixelValue(point_in_plane, image_plane, image_param):
     #TODO use camera parameters matrix to warp point to proper pixel
@@ -272,34 +275,48 @@ def getPixelValue(point_in_plane, image_plane, image_param):
 
     return np.array([x_pixel,y_pixel])
 
+
 #export to a text file usable by ODM
-def ExportGCPs(filepath, intersection_points):
+def ExportGCPs(filepath, gcp_dict, ds):
+    #format
+    #<projection>
+    #geo_x geo_y geo_z im_x im_y image_name [gcp_name] [extra1] [extra2]
+    
+    #example
+    #+proj=utm +zone=10 +ellps=WGS84 +datum=WGS84 +units=m +no_defs
+    #544256.7 5320919.9 5 3044 2622 IMG_0525.jpg
+
     f = open(filepath, "w")
     with f as file:
         #header
-        header = "header"
-        file.writelines(header+"\n")
+        wkt = ds.GetProjection()
+        srs = osr.SpatialReference(wkt)
+        epsg_code = srs.GetAttrValue('AUTHORITY', 1)
+        header = f"EPSG:{epsg_code}"
+        file.write(header)
         
-        #GCPs
-        for gcp in intersection_points:
-            gcp_msg = str(gcp)
-            file.writelines(gcp_msg+"\n")
+        #GCPs in each images
+        for key in gcp_dict.keys():
+            for gcp in gcp_dict[key]:
+                #gcp = source point (0:3) pos, intersection position (3:6) and pixel value(6:8)
+                gcp_msg = f"{gcp[0]:.12f} {gcp[1]:.12f} {gcp[2]:.12f} {int(gcp[6]):d} {int(gcp[7]):d} {key}\n"
+                file.write(gcp_msg)
     
     f.close()
 
+
 #interpret arguments for this script
 def argparsing():
+    #TODO
     return 0
 
+#main program process
 if __name__  == "__main__":
     #0 - process args
     #TODO
 
-    #1 - Read data sources
-    gdal.UseExceptions()
-    dem = readDEMFile('C:/Users/simon/OneDrive/Uni/PMC/dataset/HRDEM-Surface.tif')
-    
-    #world origin (0,0,0) is local CRS of camera
+    #1 - Read data sources    
+    #world origin (0,0,0) is local CRS DEM origin 
     #posision and rotation matrix for the camera -> obtained from loaded params
     #T 0->Cam
     #on pose que le z pointe vers l'avant (sors de l'objectif) et le x vers le dessus de la camera
@@ -312,6 +329,11 @@ if __name__  == "__main__":
                                    [0,0,0,1]])
     #fov degrees vertical, horizontal, n pixel x, n pixel y
     test_camera_params = [10,15,6000,4000]
+    test_image_filename = "image1.tif"
+    
+    gdal.UseExceptions()
+    dem = readDEMFile('C:/Users/simon/OneDrive/Uni/PMC/dataset/HRDEM-Surface.tif')
+    gcp_dict = {} #keys must be image filename used for gcp extraction
 
     #2 - process DEM to North-East coord of each pixel
     # TODO seek optimisation, is this step necessary
@@ -352,17 +374,16 @@ if __name__  == "__main__":
         gcp = np.hstack((point,intersection_point,pixel))
         intersection_points = np.vstack((intersection_points, gcp))
 
+    gcp_dict[test_image_filename] = intersection_points
+    #11 - TODO:verify if there is multiple gcp in the same pixel
 
-    #11 - TODO:Export to txt file
-    ExportGCPs("gcp_list.txt",intersection_points)
 
-    print("fin")
-    #v1 = vectorFrom2Points(test_camera_matrix[0:3,[3]],test_ground[0:3,[13]])
+    #12 - Export to txt file
+    ExportGCPs("gcp_list.txt", gcp_dict, dem)
+    
    
     #plot 1 intersection for convenience
     helperPlot(NE_elevation_array, test_camera_matrix, test_corners, point, vec, image_plan_normal, intersection_point, 0.25)
-    
-#resumé des steps
 
 
 ##unknowns
@@ -373,4 +394,3 @@ if __name__  == "__main__":
 ##Améliorations possibles
 # multithreading du calcul des points
 # preloading des bon DEM
-# utiliser des points custom
