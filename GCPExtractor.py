@@ -8,6 +8,8 @@ from mpl_toolkits import mplot3d
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.patches import FancyArrowPatch
 from mpl_toolkits.mplot3d import proj3d
+from osgeo import gdal
+from osgeo import ogr, osr
 
 class Arrow3D(FancyArrowPatch):
     def __init__(self, x, y, z, dx, dy, dz, *args, **kwargs):
@@ -40,10 +42,12 @@ def _arrow3D(ax, x, y, z, dx, dy, dz, *args, **kwargs):
 
 
 def helperPlot(ground, camera_matrix, image_plane, gcp, pvector, img_norm, intersect, opacity):
+    setattr(Axes3D, 'arrow3D', _arrow3D)
     fig = plt.figure()
     ax = fig.add_subplot(projection='3d')
+    ax.set_title("Visualisation d'un calcul de PCG")
     #ground
-    ax.plot_trisurf(ground[0,:],ground[1,:],ground[2,:], color = (139/255, 69/255, 19/255, opacity))
+    ax.plot_trisurf(ground[0,:],ground[1,:],ground[2,:], color = (139/255, 69/255, 19/255, opacity), edgecolor=(139/255, 69/255, 19/255, 1), linewidth=0.1)
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
     ax.set_zlabel('Z')
@@ -61,25 +65,46 @@ def helperPlot(ground, camera_matrix, image_plane, gcp, pvector, img_norm, inter
     ax.plot3D([camera_matrix[0,3],image_plane[0,2]], [camera_matrix[1,3],image_plane[1,2]], [camera_matrix[2,3],image_plane[2,2]], color='Black')
     ax.plot3D([camera_matrix[0,3],image_plane[0,3]], [camera_matrix[1,3],image_plane[1,3]], [camera_matrix[2,3],image_plane[2,3]], color='Black')
     #gcp point vector
-    ax.scatter3D(gcp[0,0],gcp[1,0],gcp[2,0], marker='x')
+    ax.scatter3D(gcp[0,0],gcp[1,0],gcp[2,0], marker='x', s=75)
     arrowGCP = Arrow3D(pvector[0,0], pvector[1,0], pvector[2,0], pvector[3,0], pvector[4,0], pvector[5,0], mutation_scale=10, fc='black')
     ax.add_artist(arrowGCP)
     #image plane normal
     arrowImgN = Arrow3D(img_norm[0,0], img_norm[1,0], img_norm[2,0], img_norm[3,0], img_norm[4,0], img_norm[5,0], mutation_scale=10, fc='black')
     ax.add_artist(arrowImgN)
     #intersection point
-    ax.scatter3D(intersect[0],intersect[1],intersect[2], marker='x')
+    ax.scatter3D(intersect[0],intersect[1],intersect[2], marker='x', s=75)
+    #intersection line
     ax.plot3D([camera_matrix[0,3],intersect[0]],[camera_matrix[1,3],intersect[1]],[camera_matrix[2,3],intersect[2]], linestyle ='dashed', marker='x')
-
+    
+    #ax.set_xlim(-7.5, 7.5)
+    #ax.set_ylim(-7.5, 7.5)
+    #ax.set_zlim(0, 15)
+    
     plt.draw()
     plt.show()  
 
-setattr(Axes3D, 'arrow3D', _arrow3D)
+#plot 3d DEM
+def plotNEDEM(DEM):
+    setattr(Axes3D, 'arrow3D', _arrow3D)
+    fig = plt.figure()
+    ax = fig.add_subplot(projection='3d')
+    ax.set_title("Visualisation du DEM")   
+    X = DEM[0,:].flatten()
+    Y = DEM[1,:].flatten()
+    Z = DEM[2,:].flatten()
+    mask = Z != -32767
+    ax.scatter3D(X[mask],Y[mask],Z[mask], marker='.', c=Z[mask], cmap='viridis')        
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    plt.show()
+
+
 
 ############################
 #actual program
 
-# load the camera fixed parameters 
+# load the camera fixed parameters and output its matrix
 def loadCameraParams(filename):
     return 0 
 
@@ -88,14 +113,11 @@ def loadCameraParams(filename):
 def loadImageParams(filename):
     return 0
 
-#distance in meters (x,y) between 2 lat, long positions
-def latLongDist(lat, long, distx, disty):
-    return 0 
 
 #return the image plane corners position world coord
 def getImagePlaneCorners(camera_matrix, camera_params):
-    camera_height = camera_matrix[2,3]
-    flight_height = camera_params[2]
+    #TODO maybe add a ratio instead of a image plane at 0
+    flight_height = camera_params[2] + camera_params[2,3] #height of camera ASL at image trigger
     x_half_fov = np.deg2rad(camera_params[0]/2)
     y_half_fov = np.deg2rad(camera_params[1]/2)
     x1 = flight_height*np.tan(x_half_fov)
@@ -121,6 +143,29 @@ def toWorldCoord(camera_matrix, x, y,z):
                              [0,0,0,1]])
     pinw = np.matmul(camera_matrix,point_matrix)
     return pinw[0:3,[3]]
+
+#transform wsg84 to DEM CRS
+def cameraMatrixToLocalCoord(ds ,camera_matrix):
+    in_sr = osr.SpatialReference()
+    in_sr.ImportFromEPSG(4326) #wsg84
+    
+    wkt = ds.GetProjection()
+    srs = osr.SpatialReference(wkt)
+    epsg_code = int(srs.GetAttrValue('AUTHORITY', 1))
+    out_sr = osr.SpatialReference()
+    out_sr.ImportFromEPSG(epsg_code) 
+
+    point = ogr.Geometry(ogr.wkbPoint)
+    point.AddPoint(camera_matrix[0,3], camera_matrix[1,3])  # Longitude, Latitude
+    point.AssignSpatialReference(in_sr)
+
+    point.TransformTo(out_sr)
+
+    camera_matrix[0,3] = point.GetX()
+    camera_matrix[1,3] = point.GetY()
+
+    return camera_matrix
+
 
 
 #invert the given homogen matrix
@@ -158,12 +203,42 @@ def LinePlaneCollision(planeNormal, planePoint, rayDirection, rayPoint, epsilon=
 	return Psi
 
 
+def readDEMFile(filename):
+    #TODO vérifier le path
+    ds = gdal.Open(filename, gdal.GA_ReadOnly)
+    if ds is None:
+        raise Exception("Could not open raster file")
+    return ds
+
+
+#return a 3d array in wich the indices reflect the pixel index and in wich each indices is given its local NE coord and elevation 
+def DEMToNEArray(ds):
+    geo_transform = ds.GetGeoTransform()
+    x_origin, pixel_width, rotation_x, y_origin, rotation_y, pixel_height = geo_transform
+    elevation = ds.ReadAsArray()
+
+    output_array = np.zeros((3, ds.RasterYSize, ds.RasterXSize))
+
+    for col in range(ds.RasterXSize): #x col 
+        for row in range(ds.RasterYSize): #y row
+            output_array[0,row,col] = x_origin + (col * pixel_width) + (row * rotation_x) + (pixel_width / 2.0)
+            output_array[1,row,col] = y_origin + (col * rotation_y) + (row * pixel_height) + (pixel_height / 2.0)
+            output_array[2,row,col] = elevation[row,col]
+
+    #plotNEDEM(output_array)
+
+    return output_array
+    
 
 #interpret arguments for this script
 def argparsing():
     return 0
 
 if __name__  == "__main__":
+    # 1 - test variable setup
+    gdal.UseExceptions()
+    dem = readDEMFile('C:/Users/simon/OneDrive/Uni/PMC/dataset/HRDEM-Surface.tif')
+
     #x,y metres centré sur la cam
     # z altitude ASL
     test_ground = np.array([[-2,-1, 0, 1, 2,
@@ -187,17 +262,33 @@ if __name__  == "__main__":
     #T 0->Cam
     #on pose que le z pointe vers l'avant (sors de l'objectif) et le x vers le dessus de la camera
     #x et y devrait toujours être 0 puisque les données sont centré sur 
-    test_camera_matrix = np.array([[0,1,0,0],
-                                   [1,0,0,0],
-                                   [0,0,-1,15],
+
+    #WSG84 coord of test data 45.43401806769384, -71.85260984356981
+    test_camera_matrix = np.array([[0,1,0,45.43401806769384],
+                                   [1,0,0,-71.85260984356981],
+                                   [0,0,-1,178],
                                    [0,0,0,1]])
-    #fov degrees vertical, horizontal, flight height
-    test_camera_params = [10,15,10]
+    #fov degrees vertical, horizontal, flight height AGL
+    test_camera_params = [10,15,100]
+
+    #test camera position in wsg84
+    test_cam_pos = [45.43401806769384, -71.85260984356981, 178]
+
+    #2 - put camera in DEM CRS
+    test_camera_matrix = cameraMatrixToLocalCoord(dem, test_camera_matrix)
+
+    #3 - process DEM to North-East coord of each pixel
+    # TODO seek optimisation, is this step necessary
+
+    NE_elevation_array = DEMToNEArray(dem)
     
+    #4 - calcul du plan de l'image
     #plan de l'image
     test_corners = getImagePlaneCorners(test_camera_matrix,test_camera_params)
     
     #vecteur de gcp avec le point 14 du DEM
+    points_in_view = 1
+
     v1 = vectorFrom2Points(test_camera_matrix[0:3,[3]],test_ground[0:3,[13]])
 
     # find the normal to the image plan
@@ -207,12 +298,13 @@ if __name__  == "__main__":
     intersection_point = LinePlaneCollision(image_plan_normal[3:6,0],image_plan_normal[0:3,0],v1[3:6,0],v1[0:3,0])
     
     #plot for convenience
-    helperPlot(test_ground, test_camera_matrix, test_corners,test_ground[0:3,[13]], v1, image_plan_normal, intersection_point, 0.5)
+    helperPlot(test_ground, test_camera_matrix, test_corners,test_ground[0:3,[13]], v1, image_plan_normal, intersection_point, 0.25)
     
     
 #resumé des steps
-# 1- setup des variables de test
+# 1- setup des variables
 #       > pour l'instant représente un DEM imaginaire qui aurait déjà été transformé de lat/long à x/y metres centré sur le drone
+
 # 2- calcul de la position des coins de l'image
 # 3- calcul le vecteur de diretion de la camera vers un point de la grille du DEM
 #       > TODO automatiser le choix des points à extraire
