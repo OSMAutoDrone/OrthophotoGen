@@ -253,13 +253,49 @@ def getPointsInView(poly_points, point_array):
 
     return points_in_poly
 
+#return the pixel value 
+def getPixelValue(point_in_plane, image_plane, image_param):
+    #TODO use camera parameters matrix to warp point to proper pixel
+    #right now it assumes that images are corrected before passing to ODM
+    #would simplify the process
+
+    x1 = image_plane[0,0]
+    y1 = image_plane[1,0]
+    x2 = image_plane[0,1]
+    y2 = image_plane[1,3]
+
+    x_pixel_size = (x2-x1)/image_param[0]
+    x_pixel = int((point_in_plane[0]-x1)/x_pixel_size)
+
+    y_pixel_size = (y2-y1)/image_param[1]
+    y_pixel = int((point_in_plane[1]-y1)/y_pixel_size)
+
+    return np.array([x_pixel,y_pixel])
+
+#export to a text file usable by ODM
+def ExportGCPs(filepath, intersection_points):
+    f = open(filepath, "w")
+    with f as file:
+        #header
+        header = "header"
+        file.writelines(header+"\n")
+        
+        #GCPs
+        for gcp in intersection_points:
+            gcp_msg = str(gcp)
+            file.writelines(gcp_msg+"\n")
+    
+    f.close()
 
 #interpret arguments for this script
 def argparsing():
     return 0
 
 if __name__  == "__main__":
-    # 1 - Read data sources
+    #0 - process args
+    #TODO
+
+    #1 - Read data sources
     gdal.UseExceptions()
     dem = readDEMFile('C:/Users/simon/OneDrive/Uni/PMC/dataset/HRDEM-Surface.tif')
     
@@ -274,15 +310,18 @@ if __name__  == "__main__":
                                    [1,0,0,-71.85260984356981],
                                    [0,0,-1,278],
                                    [0,0,0,1]])
-    #fov degrees vertical, horizontal
-    test_camera_params = [10,15]
+    #fov degrees vertical, horizontal, n pixel x, n pixel y
+    test_camera_params = [10,15,6000,4000]
 
-    #2 - put camera in DEM CRS
-    test_camera_matrix = cameraMatrixGlobalToLocalCoord(dem, test_camera_matrix)
-
-    #3 - process DEM to North-East coord of each pixel
+    #2 - process DEM to North-East coord of each pixel
     # TODO seek optimisation, is this step necessary
     NE_elevation_array = DEMToNEArray(dem)
+
+    #TODO add loop for multiple images instead of simple image
+
+    #3 - put camera in DEM CRS
+    test_camera_matrix = cameraMatrixGlobalToLocalCoord(dem, test_camera_matrix)
+
     
     #4 - calcul du plan de l'image
     #plan de l'image
@@ -296,7 +335,7 @@ if __name__  == "__main__":
     #6 - calculate image plane normal
     image_plan_normal = planeNormalFrom3points(test_corners[:,[0]],test_corners[:,[1]],test_corners[:,[2]])
 
-    intersection_points = np.array([])
+    intersection_points = np.empty((0, 8))
     #for each point
     #TODO optimisation with multithreading
     for point in points_in_view :
@@ -306,20 +345,21 @@ if __name__  == "__main__":
         #8 - calculate vector intersection in image plane
         intersection_point = LinePlaneCollision(image_plan_normal[3:6,0],image_plan_normal[0:3,0],vec[3:6,0],vec[0:3,0])
         
-        #9 - combine source point (0:3) pos and intersection position (3:6) and add it to the intersection list
-        point_and_inter = np.array([np.hstack((point,intersection_point))]).T
-        intersection_points = np.append(intersection_points, point_and_inter)
+        #9 - Get pixel value in image plane for each intersection point
+        pixel = getPixelValue(point, test_corners, test_camera_params[2:4])
+        
+        #10 - combine source point (0:2) pos, intersection position (3:5) and pixel value(6:7). add it to the intersection list
+        gcp = np.hstack((point,intersection_point,pixel))
+        intersection_points = np.vstack((intersection_points, gcp))
 
-    #10 - TODO:Get pixel value in image plane for each intersection point
-    
 
     #11 - TODO:Export to txt file
-
+    ExportGCPs("gcp_list.txt",intersection_points)
 
     print("fin")
     #v1 = vectorFrom2Points(test_camera_matrix[0:3,[3]],test_ground[0:3,[13]])
    
-    #plot for convenience
+    #plot 1 intersection for convenience
     helperPlot(NE_elevation_array, test_camera_matrix, test_corners, point, vec, image_plan_normal, intersection_point, 0.25)
     
 #resumé des steps
