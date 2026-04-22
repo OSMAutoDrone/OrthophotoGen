@@ -49,17 +49,17 @@ def helperPlot(ground, camera_matrix, image_plane, gcp, pvector, img_norm, inter
     setattr(Axes3D, 'arrow3D', _arrow3D)
     fig = plt.figure()
     ax = fig.add_subplot(projection='3d')
-    ax.set_title("Visualisation d'un calcul de PCG")
+    ax.set_title("Visualisation d'un calcul de PCG") 
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
     #ground
     Xg = ground[0,:].flatten()
     Yg = ground[1,:].flatten()
     Zg = ground[2,:].flatten()
     mask = Zg != -32767
-    #ax.scatter3D(Xg[mask],Yg[mask],Zg[mask], marker='.', c=Z[mask], cmap='viridis') 
-    ax.plot_trisurf(Xg[mask],Yg[mask],Zg[mask], color = (139/255, 69/255, 19/255, opacity), edgecolor=(139/255, 69/255, 19/255, 1), linewidth=0.1)
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z')
+    ax.scatter3D(Xg[mask],Yg[mask],Zg[mask], marker='.', s=2, c=Zg[mask], cmap='Greys', alpha=0.05)
+    #ax.plot_trisurf(Xg[mask],Yg[mask],Zg[mask], color = (139/255, 69/255, 19/255, opacity), edgecolor=(139/255, 69/255, 19/255, 1), linewidth=0.1)
     #camera
     arrowx = Arrow3D(camera_matrix[0,3],camera_matrix[1,3],camera_matrix[2,3], camera_matrix[0,0], camera_matrix[1,0], camera_matrix[2,0], mutation_scale=10, fc='red')
     arrowy = Arrow3D(camera_matrix[0,3],camera_matrix[1,3],camera_matrix[2,3], camera_matrix[0,1], camera_matrix[1,1], camera_matrix[2,1], mutation_scale=10, fc='green')
@@ -84,11 +84,10 @@ def helperPlot(ground, camera_matrix, image_plane, gcp, pvector, img_norm, inter
     ax.scatter3D(intersect[0],intersect[1],intersect[2], marker='x', s=75)
     #intersection line
     ax.plot3D([camera_matrix[0,3],intersect[0]],[camera_matrix[1,3],intersect[1]],[camera_matrix[2,3],intersect[2]], linestyle ='dashed', marker='x')
-    
-    #ax.set_xlim(-7.5, 7.5)
-    #ax.set_ylim(-7.5, 7.5)
-    #ax.set_zlim(0, 15)
-    
+
+    ax.set_xlim(Xg.min(), Xg.max())
+    ax.set_ylim(Yg.min(), Yg.max())
+    ax.set_zlim(0,300)
     plt.draw()
     plt.show()  
 
@@ -292,7 +291,7 @@ def ExportGCPs(filepath, gcp_dict, ds):
         wkt = ds.GetProjection()
         srs = osr.SpatialReference(wkt)
         epsg_code = srs.GetAttrValue('AUTHORITY', 1)
-        header = f"EPSG:{epsg_code}"
+        header = f"EPSG:{epsg_code} \n"
         file.write(header)
         
         #GCPs in each images
@@ -328,7 +327,7 @@ if __name__  == "__main__":
                                    [0,0,-1,278],
                                    [0,0,0,1]])
     #fov degrees vertical, horizontal, n pixel x, n pixel y
-    test_camera_params = [10,15,6000,4000]
+    test_camera_params = [25,40,6000,4000]
     test_image_filename = "image1.tif"
     
     gdal.UseExceptions()
