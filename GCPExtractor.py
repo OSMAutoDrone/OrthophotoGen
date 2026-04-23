@@ -238,8 +238,6 @@ def DEMToNEArray(ds):
             output_array[1,row,col] = y_origin + (col * rotation_y) + (row * pixel_height) + (pixel_height / 2.0)
             output_array[2,row,col] = elevation[row,col]
 
-    #plotNEDEM(output_array)
-
     return output_array
     
 
@@ -375,12 +373,14 @@ if __name__  == "__main__":
 
     gcp_dict[test_image_filename] = intersection_points
     #11 - TODO:verify if there is multiple gcp in the same pixel
-
+    #average of points in same pixel? should not happen often
 
     #12 - Export to txt file
     ExportGCPs("gcp_list.txt", gcp_dict, dem)
     
    
+    #plot only ground
+    #plotNEDEM(output_array)
     #plot 1 intersection for convenience
     helperPlot(NE_elevation_array, test_camera_matrix, test_corners, point, vec, image_plan_normal, intersection_point, 0.25)
 
